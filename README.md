@@ -27,9 +27,9 @@ After=microxrceagent.service remote-fs.target syslog.target
 Wants=microxrceagent.service
 
 [Service]
-User=nsl
-WorkingDirectory=/home/nsl
-ExecStart=/bin/bash /home/nsl/ros2_startup.bash
+User=pace
+WorkingDirectory=/home/pace
+ExecStart=/bin/bash /home/pace/ros2_startup.bash
 Restart=on-failure
 KillMode=control-group
 
@@ -37,18 +37,18 @@ KillMode=control-group
 WantedBy=multi-user.target
 ```
 
-#### `/home/nsl/ros2_startup.bash`
+#### `/home/pace/ros2_startup.bash`
 ```
 #!/bin/bash
 source /opt/ros/jazzy/setup.bash
-source /home/nsl/src/sysid-ROS2-PX4/install/setup.bash
-ros2 run sysid mtd
+source /home/pace/src/sysid-ROS2-PX4/install/setup.bash
+ros2 run sysid fox
 
 ```
 
 Mark the bash script as executable and enable the systemd services.
 ```
-$ sudo chmod +x /home/nsl/ros2_startup.bash
+$ sudo chmod +x /home/pace/ros2_startup.bash
 $ sudo systemctl daemon-reload
 $ sudo systemctl enable --now microxrceagent.service ros2_startup.service
 ```
