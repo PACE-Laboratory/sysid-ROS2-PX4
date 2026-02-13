@@ -33,7 +33,7 @@ include_directories(include SYSTEM ${Eigen3_INCLUDE_DIRS})
 # Fox
 add_executable(fox fox.cpp)
 ament_target_dependencies(fox rclcpp px4_msgs)
-install(TARGETS mtd DESTINATION lib/${PROJECT_NAME})
+install(TARGETS fox DESTINATION lib/${PROJECT_NAME})
 
 # eSPAARO
 # add_executable(esp esp.cpp)

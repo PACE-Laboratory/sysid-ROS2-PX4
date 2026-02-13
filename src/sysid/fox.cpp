@@ -46,14 +46,8 @@ public:
 		input_rc_subscriber_ = this->create_subscription<px4_msgs::msg::InputRc>("/fmu/out/input_rc", qos_rc,
 			[this](const px4_msgs::msg::InputRc::UniquePtr msg) {
 				PTI_PWM = msg->values[7];
-				amp = 1.0*(msg->values[8]-988)/1025.0; // [988,2013] --> [0, 1]
-				if (msg->values[11] > 1666) {
-					prop_amp = 0.5;
-				} else if (msg->values[11] > 1333) {
-					prop_amp = 0.25;
-				} else {
-					prop_amp = 0.0;
-				}
+				amp = 1.0*(msg->values[8]-1011)/977.0; // [1011,1988] --> [0, 1]
+				prop_amp = 0.5*(msg->values[11]-1011)/977.0; // [1011,1988] --> [0, 1]
 			});
 		rmw_qos_profile_t qos_profile_mcs = rmw_qos_profile_sensor_data;
 		auto qos_mcs = rclcpp::QoS(rclcpp::QoSInitialization(qos_profile_mcs.history, 1), qos_profile_mcs);
@@ -63,6 +57,7 @@ public:
 				de = msg->pitch;
 				dr = msg->yaw;
 				dt = msg->throttle;
+				df = msg->flaps;
 			});
 		rmw_qos_profile_t qos_profile_vs = rmw_qos_profile_sensor_data;
 		auto qos_vs = rclcpp::QoS(rclcpp::QoSInitialization(qos_profile_vs.history, 1), qos_profile_vs);
@@ -113,12 +108,12 @@ private:
 	
 	// Amplitude knob and PTI logic
 	double amp = 0.0; // [0.,1]
-	double prop_amp = 0.0; // {0.0, 0.5, 1.0}
+	double prop_amp = 0.0; // [0.,1]
 	uint16_t PTI_PWM;
 	bool PTI = false;
 
 	// Stick positions
-	double da, de, dr, dt;
+	double da, de, dr, df, dt;
 
 	// Offboard mode boolean
 	bool offboard_mode;
@@ -155,10 +150,14 @@ void OffboardControl::publish_actuators()
 	ActuatorServos msg_servos{};
 	ActuatorMotors msg_motors{};
 
-	// Populate with manual control inputs (ASW-17)
+	// Populate with manual control inputs
+	// TODO: check signs
 	msg_servos.control[0] = da;
-	msg_servos.control[1] = -de;
-	msg_servos.control[2] = dr;
+	msg_servos.control[1] = da;
+	msg_servos.control[2] = de;
+	msg_servos.control[3] = dr;
+	msg_servos.control[4] = df;
+	msg_servos.control[5] = df;
 	msg_motors.control[0] = 0.5*(dt + 0.99); // map stick (-1,1) to [0,1)
 
 	// If we are not in PTI mode, and the PTI switch was engaged, get the initial time.
@@ -179,9 +178,7 @@ void OffboardControl::publish_actuators()
 		std::vector<float> input = InputSignal[time_idx];
 		
 		// Add excitation to the manual control inputs
-		msg_servos.control[0] += amp*input[0];
-		msg_servos.control[1] += amp*input[1];
-		msg_servos.control[2] += amp*input[2];
+		for (int i = 0; i < 6; i++) msg_servos.control[i] += amp*input[i];
 		msg_motors.control[0] += prop_amp*input[3];
 
 		// If the PTI switch has been set to LOW, set exit from PTI mode
