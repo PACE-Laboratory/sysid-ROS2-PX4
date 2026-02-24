@@ -191,7 +191,7 @@ void OffboardControl::publish_actuators()
 	// Set the timestamp and publish
 	uint64_t t = this->get_clock()->now().nanoseconds() / 1000;
 	msg_servos.timestamp = t;
-	msg_servos.timestamp = t;
+	msg_motors.timestamp = t;
 	actuator_servos_publisher_->publish(msg_servos);
 	actuator_motors_publisher_->publish(msg_motors);
 }
