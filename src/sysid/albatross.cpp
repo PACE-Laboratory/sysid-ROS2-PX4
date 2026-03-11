@@ -96,7 +96,8 @@ private:
 	rclcpp::Subscription<VehicleStatus>::SharedPtr vehcile_status_subscriber_;
 
 	// Excitation signal
-	const std::string ms_file = "/home/pace/src/sysid-ROS2-PX4/src/signals/ms_albatross_3s1p_T30_f005-075-2_100hz.csv";
+	// TODO: Update absolute file path
+	const std::string ms_file = "/home/pace/src/sysid-ROS2-PX4/src/signals/ms_albatross_3s1p_T30_f005-075-2_100hz_plustrim.csv";
 	const int T_ms = 30; // seconds
 	const int fs = 100; // Hz
 	std::map<int,std::vector<float>> InputSignal;

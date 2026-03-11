@@ -30,15 +30,10 @@ find_package(sensor_msgs REQUIRED)
 #################
 include_directories(include SYSTEM ${Eigen3_INCLUDE_DIRS})
 
-# Fox
-add_executable(fox fox.cpp)
-ament_target_dependencies(fox rclcpp px4_msgs)
-install(TARGETS fox DESTINATION lib/${PROJECT_NAME})
-
-# eSPAARO
-# add_executable(esp esp.cpp)
-# ament_target_dependencies(esp rclcpp px4_msgs)
-# install(TARGETS esp DESTINATION lib/${PROJECT_NAME})
+# Albatross
+add_executable(albatross albatross.cpp)
+ament_target_dependencies(albatross rclcpp px4_msgs)
+install(TARGETS albatross DESTINATION lib/${PROJECT_NAME})
 
 ############
 # Install ##
@@ -46,7 +41,6 @@ install(TARGETS fox DESTINATION lib/${PROJECT_NAME})
 
 # Export information to downstream packages
 ament_export_dependencies(ament_cmake rclcpp eigen3_cmake_module Eigen3 px4_msgs geometry_msgs sensor_msgs)
-
 
 ############
 # Testing ##
