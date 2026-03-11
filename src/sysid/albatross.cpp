@@ -58,24 +58,29 @@ public:
 
 		// Load CSV
 		load_data();
-		if (InputSignal.count(1)<1) {
-			RCLCPP_ERROR(get_logger(), "Error loading CSV: %s", ms_file.c_str());
-		} else {
-			RCLCPP_INFO(get_logger(), "Successfully loaded CSV: %s", ms_file.c_str());
+		if (InputSignal.empty()) {
+    		RCLCPP_ERROR(get_logger(), "Error loading CSV: %s", ms_file.c_str());
 		}
 
 		auto timer_callback = [this]() -> void {
+			// Get current time
+			const uint64_t now_us = this->get_clock()->now().nanoseconds() / 1000;
+
 			// Let PX4 know what we will be sending
 			publish_offboard_control_mode();
 
-			// If we are not in offboard mode yet, assume this is the intial time.
-			if (!offboard_mode) {
-				t0 = this->get_clock()->now().nanoseconds() / 1000; // microseconds
-
-			// If we are in offboard mode, publish actuators based on time since t0.
-			} else {
+			// If we have just entered offboard mode, set initial time
+			if (offboard_mode && !prev_offboard_mode) {
+				t0 = now_us;
+			}
+			
+			// If we are in offboard mode, publish actuator commands
+			if (offboard_mode) {
 				publish_actuators();
 			}
+
+			// Update previous offboard mode state
+			prev_offboard_mode = offboard_mode;
 		};
 		timer_ = this->create_wall_timer(10ms, timer_callback); // 10ms interval must correspond to 1/fs
 	}
@@ -87,24 +92,21 @@ private:
 	rclcpp::Publisher<OffboardControlMode>::SharedPtr offboard_control_mode_publisher_;
 	rclcpp::Publisher<ActuatorServos>::SharedPtr actuator_servos_publisher_;
 	rclcpp::Publisher<ActuatorMotors>::SharedPtr actuator_motors_publisher_;
-	rclcpp::Subscription<InputRc>::SharedPtr input_rc_subscriber_;
 	rclcpp::Subscription<ManualControlSetpoint>::SharedPtr manual_control_setpoint_subscriber_;
 	rclcpp::Subscription<VehicleStatus>::SharedPtr vehcile_status_subscriber_;
 
-	std::atomic<uint64_t> timestamp_;   //!< common synced timestamped
-
-	// CSV info and map
-	const std::string ms_file = "/home/pace/src/sysid-ROS2-PX4/src/signals/ms_aeroprop_3s1p_T30_f005-075-2_100hz.csv";
+	// Excitation signal
+	const std::string ms_file = "/home/pace/src/sysid-ROS2-PX4/src/signals/ms_albatross_3s1p_T30_f005-075-2_100hz.csv";
 	const int T_ms = 30; // seconds
 	const int fs = 100; // Hz
 	std::map<int,std::vector<float>> InputSignal;
 	uint64_t t0 = 0; // microseconds
 
 	// Stick positions
-	double da, de, dr, dt;
+	double da = 0.0, de = 0.0, dr = 0.0, df = 0.0, dt = 0.0;
 
-	// Offboard mode boolean
-	bool offboard_mode;
+	// Offboard mode booleans
+	bool offboard_mode = false, prev_offboard_mode = false;
 
 	void publish_offboard_control_mode();
 	void publish_actuators();
@@ -140,22 +142,38 @@ void OffboardControl::publish_actuators()
 
 	// Populate with manual control inputs
 	// TODO: check signs and allocation
-	msg_servos.control[0] = da;
-	msg_servos.control[1] = da;
-	msg_servos.control[2] = de;
-	msg_servos.control[3] = dr;
-	msg_motors.control[0] = 0.5*(dt + 0.99); // map stick (-1,1) to [0,1)
+	msg_servos.control[0] = -da;
+	msg_servos.control[1] = df;
+	msg_servos.control[2] = df;
+	msg_servos.control[3] = da;
+	msg_servos.control[4] = dr;
+	msg_servos.control[5] = de;
+	msg_motors.control[0] = 0.5*(dt + 1.0);
 
 	// Compute the time index
 	uint64_t t1 = this->get_clock()->now().nanoseconds() / 1000; // microseconds
 	int time_idx = (int)( (t1-t0)/(1000000/fs) ) % (T_ms*fs);
+	//
+	// TODO: Check to see if the following works instead (should be safer)
+	/*
+	auto it = InputSignal.find(time_idx);
+	if (it == InputSignal.end() || it->second.size() < 4) {
+    	RCLCPP_ERROR(this->get_logger(), "Missing or malformed input at index %d", time_idx);
+    	return;
+	}
+	const std::vector<float>& input = it->second;
+	*/
 	
 	// Get the input excitation vector from the map
 	std::vector<float> input = InputSignal[time_idx];
 	
-	// Add excitation to the manual control inputs
-	for (int i = 0; i < 4; i++) msg_servos.control[i] += amp*input[i];
-	msg_motors.control[0] += prop_amp*input[3];
+	// Add excitation (da,de,dr,dt) to the manual control inputs (daL,~,~,daR,dr,de,dt) [no flaps]
+	// TODO: check signs and allocation
+	msg_servos.control[0] += -input[0]; // left aileron
+	msg_servos.control[3] += input[0]; // right aileron
+	msg_servos.control[4] += input[2]; // rudder
+	msg_servos.control[5] += input[1]; // elevator
+	msg_motors.control[0] += input[3]; // motor
 
 	// Set the timestamp and publish
 	uint64_t t = this->get_clock()->now().nanoseconds() / 1000;
@@ -171,6 +189,9 @@ void OffboardControl::load_data()
 	std::ifstream indata;
 	indata.open(ms_file);
 	std::string line;
+	if (!indata.is_open()) {
+		RCLCPP_ERROR(this->get_logger(), "Could not open CSV: %s", ms_file.c_str());
+	return;
 
 	// Loop through each line (i.e. time index)
 	int tidx = 0;
@@ -193,7 +214,6 @@ void OffboardControl::load_data()
 		InputSignal[tidx] = values;
 	}
 }
-
 
 int main(int argc, char *argv[])
 {
