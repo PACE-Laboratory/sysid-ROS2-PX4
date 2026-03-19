@@ -45,7 +45,6 @@ public:
 		auto qos_rc = rclcpp::QoS(rclcpp::QoSInitialization(qos_profile_rc.history, 1), qos_profile_rc);
 		input_rc_subscriber_ = this->create_subscription<px4_msgs::msg::InputRc>("/fmu/out/input_rc", qos_rc,
 			[this](const px4_msgs::msg::InputRc::UniquePtr msg) {
-				PTI_PWM = msg->values[7];
 				amp = 1.0*(msg->values[8]-1011)/977.0; // [1011,1988] --> [0, 1]
 				prop_amp = 0.5*(msg->values[11]-1011)/977.0; // [1011,1988] --> [0, 1]
 			});
@@ -64,6 +63,7 @@ public:
 		vehcile_status_subscriber_ = this->create_subscription<px4_msgs::msg::VehicleStatus>("/fmu/out/vehicle_status", qos_vs,
 			[this](const px4_msgs::msg::VehicleStatus::UniquePtr msg) {
 				offboard_mode = (msg->nav_state == msg->NAVIGATION_STATE_OFFBOARD);
+				test = msg->nav_state;
 			});
 
 		// Load CSV
@@ -74,16 +74,30 @@ public:
 			RCLCPP_INFO(get_logger(), "Successfully loaded CSV: %s", ms_file.c_str());
 		}
 
-		RCLCPP_INFO(get_logger(), "PTI PWM = %i",PTI_PWM);
-
 		auto timer_callback = [this]() -> void {
+			// Get current time
+			const uint64_t now_us = this->get_clock()->now().nanoseconds() / 1000;
+
+			// Let PX4 know what we will be sending
 			publish_offboard_control_mode();
-			// Publish actuators if we are in offboard mode
+			RCLCPP_INFO(get_logger(), "mode = %i", test);
+
+			// If we have just entered offboard mode, set initial time
+			if (offboard_mode && !prev_offboard_mode) {
+				t0 = now_us;
+				RCLCPP_INFO(get_logger(), "offboard_mode && !prev_offboard_mode");
+			}
+			
+			// If we are in offboard mode, publish actuator commands
 			if (offboard_mode) {
+				RCLCPP_INFO(get_logger(), "offboard_mode");
 				publish_actuators();
 			}
+
+			// Update previous offboard mode state
+			prev_offboard_mode = offboard_mode;
 		};
-		timer_ = this->create_wall_timer(10ms, timer_callback);
+		timer_ = this->create_wall_timer(10ms, timer_callback); // 10ms interval must correspond to 1/fs
 	}
 
 private:
@@ -96,8 +110,6 @@ private:
 	rclcpp::Subscription<InputRc>::SharedPtr input_rc_subscriber_;
 	rclcpp::Subscription<ManualControlSetpoint>::SharedPtr manual_control_setpoint_subscriber_;
 	rclcpp::Subscription<VehicleStatus>::SharedPtr vehcile_status_subscriber_;
-
-	std::atomic<uint64_t> timestamp_;   //!< common synced timestamped
 
 	// CSV info and map
 	const std::string ms_file = "/home/pace/src/sysid-ROS2-PX4/src/signals/ms_aeroprop_3s1p_T30_f005-075-2_100hz.csv";
@@ -115,8 +127,9 @@ private:
 	// Stick positions
 	double da, de, dr, df, dt;
 
-	// Offboard mode boolean
-	bool offboard_mode;
+	// Offboard mode booleans
+	bool offboard_mode = false, prev_offboard_mode = false;
+	int test = -1;
 
 	void publish_offboard_control_mode();
 	void publish_actuators();
@@ -158,35 +171,32 @@ void OffboardControl::publish_actuators()
 	msg_servos.control[3] = dr;
 	msg_servos.control[4] = df;
 	msg_servos.control[5] = df;
-	msg_motors.control[0] = 0.5*(dt + 0.99); // map stick (-1,1) to [0,1)
+	msg_motors.control[0] = 0.5*(dt + 1.0); // map stick (-1,1) to [0,1)
 
-	// If we are not in PTI mode, and the PTI switch was engaged, get the initial time.
-	if (!PTI && PTI_PWM > 1500) {
-		RCLCPP_INFO(get_logger(), "PTI On");
-		PTI =  true;
-		t0 = this->get_clock()->now().nanoseconds() / 1000; // microseconds
+	// Compute the time index
+	uint64_t t1 = this->get_clock()->now().nanoseconds() / 1000; // microseconds
+	int time_idx = (int)( (t1-t0)/(1000000/fs) ) % (T_ms*fs);
+	//
+	// TODO: Check to see if the following works instead (should be safer)
+	/*
+	auto it = InputSignal.find(time_idx);
+	if (it == InputSignal.end() || it->second.size() < 4) {
+    	RCLCPP_ERROR(this->get_logger(), "Missing or malformed input at index %d", time_idx);
+    	return;
 	}
+	const std::vector<float>& input = it->second;
+	*/
 	
-	// If we are in PTI mode, send excited actuator controls
-	if (PTI) { 
-
-		// Compute the time index
-		uint64_t t1 = this->get_clock()->now().nanoseconds() / 1000; // microseconds
-		int time_idx = (int)( (t1-t0)/(1000000/fs) ) % (T_ms*fs);
-
-		// Get the input excitation vector from the map
-		std::vector<float> input = InputSignal[time_idx];
-		
-		// Add excitation to the manual control inputs
-		for (int i = 0; i < 6; i++) msg_servos.control[i] += amp*input[i];
-		msg_motors.control[0] += prop_amp*input[3];
-
-		// If the PTI switch has been set to LOW, set exit from PTI mode
-		if ( PTI_PWM <= 1500 ) {
-			RCLCPP_INFO(get_logger(), "PTI Off");
-			PTI = false;
-		}
-	}
+	// Get the input excitation vector from the map
+	std::vector<float> input = InputSignal[time_idx];
+	
+	// Add excitation (da,de,dr,dt) to the manual control inputs (daL,~,~,daR,dr,de,dt) [no flaps]
+	// TODO: check signs and allocation
+	msg_servos.control[0] += -input[0]; // left aileron
+	msg_servos.control[3] += input[0]; // right aileron
+	msg_servos.control[4] += input[2]; // rudder
+	msg_servos.control[5] += input[1]; // elevator
+	msg_motors.control[0] += input[3]; // motor
 
 	// Set the timestamp and publish
 	uint64_t t = this->get_clock()->now().nanoseconds() / 1000;
