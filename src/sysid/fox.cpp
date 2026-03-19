@@ -46,7 +46,7 @@ public:
 		input_rc_subscriber_ = this->create_subscription<px4_msgs::msg::InputRc>("/fmu/out/input_rc", qos_rc,
 			[this](const px4_msgs::msg::InputRc::UniquePtr msg) {
 				amp = 1.0*(msg->values[8]-1011)/977.0; // [1011,1988] --> [0, 1]
-				prop_amp = 0.5*(msg->values[11]-1011)/977.0; // [1011,1988] --> [0, 1]
+				prop_amp = 0.5*(msg->values[9]-1011)/977.0; // [1011,1988] --> [0, 1]
 			});
 		rmw_qos_profile_t qos_profile_mcs = rmw_qos_profile_sensor_data;
 		auto qos_mcs = rclcpp::QoS(rclcpp::QoSInitialization(qos_profile_mcs.history, 1), qos_profile_mcs);
@@ -60,10 +60,9 @@ public:
 			});
 		rmw_qos_profile_t qos_profile_vs = rmw_qos_profile_sensor_data;
 		auto qos_vs = rclcpp::QoS(rclcpp::QoSInitialization(qos_profile_vs.history, 1), qos_profile_vs);
-		vehcile_status_subscriber_ = this->create_subscription<px4_msgs::msg::VehicleStatus>("/fmu/out/vehicle_status", qos_vs,
+		vehicle_status_subscriber_ = this->create_subscription<px4_msgs::msg::VehicleStatus>("/fmu/out/vehicle_status", qos_vs,
 			[this](const px4_msgs::msg::VehicleStatus::UniquePtr msg) {
 				offboard_mode = (msg->nav_state == msg->NAVIGATION_STATE_OFFBOARD);
-				test = msg->nav_state;
 			});
 
 		// Load CSV
@@ -80,17 +79,14 @@ public:
 
 			// Let PX4 know what we will be sending
 			publish_offboard_control_mode();
-			RCLCPP_INFO(get_logger(), "mode = %i", test);
 
 			// If we have just entered offboard mode, set initial time
 			if (offboard_mode && !prev_offboard_mode) {
 				t0 = now_us;
-				RCLCPP_INFO(get_logger(), "offboard_mode && !prev_offboard_mode");
 			}
 			
 			// If we are in offboard mode, publish actuator commands
 			if (offboard_mode) {
-				RCLCPP_INFO(get_logger(), "offboard_mode");
 				publish_actuators();
 			}
 
@@ -109,7 +105,7 @@ private:
 	rclcpp::Publisher<ActuatorMotors>::SharedPtr actuator_motors_publisher_;
 	rclcpp::Subscription<InputRc>::SharedPtr input_rc_subscriber_;
 	rclcpp::Subscription<ManualControlSetpoint>::SharedPtr manual_control_setpoint_subscriber_;
-	rclcpp::Subscription<VehicleStatus>::SharedPtr vehcile_status_subscriber_;
+	rclcpp::Subscription<VehicleStatus>::SharedPtr vehicle_status_subscriber_;
 
 	// CSV info and map
 	const std::string ms_file = "/home/pace/src/sysid-ROS2-PX4/src/signals/ms_aeroprop_3s1p_T30_f005-075-2_100hz.csv";
@@ -129,7 +125,6 @@ private:
 
 	// Offboard mode booleans
 	bool offboard_mode = false, prev_offboard_mode = false;
-	int test = -1;
 
 	void publish_offboard_control_mode();
 	void publish_actuators();
@@ -165,12 +160,12 @@ void OffboardControl::publish_actuators()
 
 	// Populate with manual control inputs
 	// TODO: check signs
-	msg_servos.control[0] = da;
-	msg_servos.control[1] = da;
-	msg_servos.control[2] = de;
-	msg_servos.control[3] = dr;
-	msg_servos.control[4] = df;
-	msg_servos.control[5] = df;
+	msg_servos.control[0] = -da; // left aileron
+	msg_servos.control[1] = da;  // right aileron
+	msg_servos.control[2] = -de; // elevator
+	msg_servos.control[3] = dr;  // rudder
+	msg_servos.control[4] = df;  // left flap
+	msg_servos.control[5] = df;  // right flap
 	msg_motors.control[0] = 0.5*(dt + 1.0); // map stick (-1,1) to [0,1)
 
 	// Compute the time index
@@ -190,13 +185,13 @@ void OffboardControl::publish_actuators()
 	// Get the input excitation vector from the map
 	std::vector<float> input = InputSignal[time_idx];
 	
-	// Add excitation (da,de,dr,dt) to the manual control inputs (daL,~,~,daR,dr,de,dt) [no flaps]
+	// Add excitation (da,de,dr,dt) to the manual control inputs
 	// TODO: check signs and allocation
-	msg_servos.control[0] += -input[0]; // left aileron
-	msg_servos.control[3] += input[0]; // right aileron
-	msg_servos.control[4] += input[2]; // rudder
-	msg_servos.control[5] += input[1]; // elevator
-	msg_motors.control[0] += input[3]; // motor
+	msg_servos.control[0] -= amp*input[0]; // left aileron
+	msg_servos.control[1] += amp*input[0]; // right aileron
+	msg_servos.control[2] -= amp*input[1]; // elevator
+	msg_servos.control[3] += amp*input[2]; // rudder
+	msg_motors.control[0] += prop_amp*input[3]; // motor
 
 	// Set the timestamp and publish
 	uint64_t t = this->get_clock()->now().nanoseconds() / 1000;
