@@ -32,7 +32,7 @@ using namespace px4_msgs::msg;
 class OffboardControl : public rclcpp::Node
 {
 public:
-	OffboardControl() : Node("fox")
+	OffboardControl() : Node("albatross")
 	{
 		// Create publishers
 		offboard_control_mode_publisher_ = this->create_publisher<OffboardControlMode>("/fmu/in/offboard_control_mode", 1);
@@ -48,18 +48,21 @@ public:
 				de = msg->pitch;
 				dr = msg->yaw;
 				dt = msg->throttle;
+				df = msg->flaps;
 			});
 		rmw_qos_profile_t qos_profile_vs = rmw_qos_profile_sensor_data;
 		auto qos_vs = rclcpp::QoS(rclcpp::QoSInitialization(qos_profile_vs.history, 1), qos_profile_vs);
-		vehcile_status_subscriber_ = this->create_subscription<px4_msgs::msg::VehicleStatus>("/fmu/out/vehicle_status", qos_vs,
+		vehicle_status_subscriber_ = this->create_subscription<px4_msgs::msg::VehicleStatus>("/fmu/out/vehicle_status", qos_vs,
 			[this](const px4_msgs::msg::VehicleStatus::UniquePtr msg) {
 				offboard_mode = (msg->nav_state == msg->NAVIGATION_STATE_OFFBOARD);
 			});
 
 		// Load CSV
 		load_data();
-		if (InputSignal.empty()) {
-    		RCLCPP_ERROR(get_logger(), "Error loading CSV: %s", ms_file.c_str());
+		if (InputSignal.count(1)<1) {
+			RCLCPP_ERROR(get_logger(), "Error loading CSV: %s", ms_file.c_str());
+		} else {
+			RCLCPP_INFO(get_logger(), "Successfully loaded CSV: %s", ms_file.c_str());
 		}
 
 		auto timer_callback = [this]() -> void {
@@ -93,7 +96,7 @@ private:
 	rclcpp::Publisher<ActuatorServos>::SharedPtr actuator_servos_publisher_;
 	rclcpp::Publisher<ActuatorMotors>::SharedPtr actuator_motors_publisher_;
 	rclcpp::Subscription<ManualControlSetpoint>::SharedPtr manual_control_setpoint_subscriber_;
-	rclcpp::Subscription<VehicleStatus>::SharedPtr vehcile_status_subscriber_;
+	rclcpp::Subscription<VehicleStatus>::SharedPtr vehicle_status_subscriber_;
 
 	// Excitation signal
 	const std::string ms_file = "/home/pace/src/sysid-ROS2-PX4/src/signals/ms_albatross_3s1p_T30_f005-075-2_100hz.csv";
@@ -153,16 +156,6 @@ void OffboardControl::publish_actuators()
 	// Compute the time index
 	uint64_t t1 = this->get_clock()->now().nanoseconds() / 1000; // microseconds
 	int time_idx = (int)( (t1-t0)/(1000000/fs) ) % (T_ms*fs);
-	//
-	// TODO: Check to see if the following works instead (should be safer)
-	/*
-	auto it = InputSignal.find(time_idx);
-	if (it == InputSignal.end() || it->second.size() < 4) {
-    	RCLCPP_ERROR(this->get_logger(), "Missing or malformed input at index %d", time_idx);
-    	return;
-	}
-	const std::vector<float>& input = it->second;
-	*/
 	
 	// Get the input excitation vector from the map
 	std::vector<float> input = InputSignal[time_idx];
@@ -189,9 +182,6 @@ void OffboardControl::load_data()
 	std::ifstream indata;
 	indata.open(ms_file);
 	std::string line;
-	if (!indata.is_open()) {
-		RCLCPP_ERROR(this->get_logger(), "Could not open CSV: %s", ms_file.c_str());
-	return;
 
 	// Loop through each line (i.e. time index)
 	int tidx = 0;
