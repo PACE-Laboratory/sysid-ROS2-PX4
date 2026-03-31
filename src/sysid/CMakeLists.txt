@@ -36,9 +36,14 @@ include_directories(include SYSTEM ${Eigen3_INCLUDE_DIRS})
 # install(TARGETS fox DESTINATION lib/${PROJECT_NAME})
 
 # ASW-17
-add_executable(asw17 asw17.cpp)
-ament_target_dependencies(asw17 rclcpp px4_msgs)
-install(TARGETS asw17 DESTINATION lib/${PROJECT_NAME})
+# add_executable(asw17 asw17.cpp)
+# ament_target_dependencies(asw17 rclcpp px4_msgs)
+# install(TARGETS asw17 DESTINATION lib/${PROJECT_NAME})
+
+# Albatross
+add_executable(albatross albatross.cpp)
+ament_target_dependencies(albatross rclcpp px4_msgs)
+install(TARGETS albatross DESTINATION lib/${PROJECT_NAME})
 
 ############
 # Install ##
@@ -46,7 +51,6 @@ install(TARGETS asw17 DESTINATION lib/${PROJECT_NAME})
 
 # Export information to downstream packages
 ament_export_dependencies(ament_cmake rclcpp eigen3_cmake_module Eigen3 px4_msgs geometry_msgs sensor_msgs)
-
 
 ############
 # Testing ##
