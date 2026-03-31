@@ -30,6 +30,16 @@ find_package(sensor_msgs REQUIRED)
 #################
 include_directories(include SYSTEM ${Eigen3_INCLUDE_DIRS})
 
+# Fox
+# add_executable(fox fox.cpp)
+# ament_target_dependencies(fox rclcpp px4_msgs)
+# install(TARGETS fox DESTINATION lib/${PROJECT_NAME})
+
+# ASW-17
+# add_executable(asw17 asw17.cpp)
+# ament_target_dependencies(asw17 rclcpp px4_msgs)
+# install(TARGETS asw17 DESTINATION lib/${PROJECT_NAME})
+
 # Albatross
 add_executable(albatross albatross.cpp)
 ament_target_dependencies(albatross rclcpp px4_msgs)
